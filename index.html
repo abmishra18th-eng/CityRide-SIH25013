@@ -1,0 +1,167 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CityRide V4 — SIH25013</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>
+:root{--bg:#f4f7fb;--card:#fff;--text:#172033;--muted:#667085;--blue:#2563eb;--green:#16a34a;--red:#dc2626;--line:#e5e7eb}*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial;background:var(--bg);color:var(--text)}header{background:#111827;color:#fff;padding:16px 22px;display:flex;justify-content:space-between;gap:15px;align-items:center}.logo{font-size:23px;font-weight:800}.sub{font-size:12px;color:#cbd5e1}nav{display:flex;gap:7px;flex-wrap:wrap}nav button{background:#1f2937;color:#fff;border:1px solid #374151;padding:9px 13px;border-radius:9px}nav button.active{background:var(--blue)}main{max-width:1250px;margin:auto;padding:20px}.page{display:none}.page.active{display:block}.hero{padding:20px;border-radius:16px;background:linear-gradient(135deg,#172554,#2563eb);color:#fff;margin-bottom:16px}.hero p{color:#dbeafe}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.two{display:grid;grid-template-columns:1.5fr 1fr;gap:15px}.card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:0 3px 15px #00000008}.metric{font-size:28px;font-weight:800;margin-top:5px}.label{font-size:13px;color:var(--muted)}#map,#adminMap{height:520px;border-radius:12px;overflow:hidden}select,input,button.action{width:100%;padding:11px;border:1px solid #d1d5db;border-radius:9px;background:#fff;font-size:14px;margin-top:6px}button.action{background:var(--blue);color:#fff;border:0;font-weight:700;cursor:pointer}.danger{background:var(--red)!important}.dark{background:#111827!important}.notice{padding:11px;border-radius:10px;background:#eff6ff;color:#1e40af;margin-top:10px;font-size:13px}.buslist{display:grid;gap:8px;margin-top:10px}.bus{border:1px solid var(--line);padding:11px;border-radius:11px;cursor:pointer}.bus:hover{border-color:#93c5fd}.badge{display:inline-block;padding:4px 8px;border-radius:99px;font-size:11px;font-weight:700}.green{background:#dcfce7;color:#166534}.red{background:#fee2e2;color:#991b1b}.yellow{background:#fef3c7;color:#92400e}.gray{background:#e5e7eb;color:#374151}.table{width:100%;border-collapse:collapse}.table th,.table td{padding:9px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}.locbox{margin-top:10px;padding:10px;border:1px dashed #93c5fd;border-radius:10px}.small{font-size:12px;color:var(--muted)}footer{text-align:center;color:#98a2b3;padding:25px;font-size:12px}@media(max-width:850px){.grid,.two{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}#map,#adminMap{height:420px}}@media(max-width:550px){.grid{grid-template-columns:1fr 1fr}header{flex-direction:column;align-items:flex-start}}
+</style></head><body>
+<header><div><div class="logo">🚌 CityRide V4</div><div class="sub">SIH25013 • Real-Time Public Transport Tracking</div></div><nav><button type="button" id="navPassenger" class="active">Passenger</button><button type="button" id="navDriver">Driver</button><button type="button" id="navAdmin">Authority</button></nav></header>
+<main>
+<section id="passenger" class="page active"><div class="hero"><h1>Real-time transport</h1><p>Live bus position • passenger location • nearby buses • ETA</p></div><div class="two"><div class="card"><div id="map"></div></div><div><div class="card"><h2>Find a bus</h2><select id="routeSelect" onchange="renderPassenger()"><option value="">Loading routes…</option></select><div id="busList" class="buslist"></div><button class="action" onclick="locatePassenger()">📍 Use My Current Location</button><div class="small" style="margin-top:7px">Your browser will ask for location permission. The app does not get your location until you allow it.</div><div id="passLoc" class="locbox small">Location: not shared</div><div id="nearbyList" class="buslist"></div></div><div class="card" style="margin-top:15px"><h2>Selected bus</h2><div id="nextStop">Select a bus</div></div></div></div></section>
+<section id="driver" class="page"><div class="hero"><h1>Driver Console</h1><p>Your Android/browser phone can become the GPS tracker for a real bus.</p></div><div class="two"><div class="card"><h2>Trip control</h2><label>Bus</label><select id="driverBus"></select><label>Route</label><select id="driverRoute"></select><button class="action" onclick="startTrip()">Start Trip</button><button class="action danger" onclick="endTrip()">End Trip</button><button class="action dark" onclick="startDemo()">▶ Start Demo GPS</button><button class="action" onclick="usePhoneGPS()">📍 Start Live Phone GPS</button><div class="notice" id="gpsStatus">GPS: waiting</div></div><div class="card"><h2>Driver status</h2><div class="grid" style="grid-template-columns:1fr 1fr"><div><div class="label">Bus</div><div class="metric" id="driverBusLabel">—</div></div><div><div class="label">Speed</div><div class="metric"><span id="driverSpeed">0</span></div><div class="label">km/h</div></div></div><p id="driverInfo">Start a trip or live GPS.</p></div></div></section>
+<section id="admin" class="page"><div class="hero"><h1>Authority Control Center</h1><p>Monitor live fleet, delayed buses, offline trackers and data source.</p></div><div class="grid"><div class="card"><div class="label">Total buses</div><div class="metric" id="mTotal">0</div></div><div class="card"><div class="label">Active</div><div class="metric" id="mActive">0</div></div><div class="card"><div class="label">Delayed</div><div class="metric" id="mDelayed">0</div></div><div class="card"><div class="label">Offline</div><div class="metric" id="mOffline">0</div></div></div><div class="two" style="margin-top:15px"><div class="card"><div id="adminMap"></div></div><div class="card"><h2>Fleet</h2><table class="table"><thead><tr><th>Bus</th><th>Route</th><th>Status</th><th>Source</th></tr></thead><tbody id="fleetTable"></tbody></table><div class="notice" id="integrationInfo">Checking integrations…</div></div></div></section>
+</main><footer>V4 uses real phone GPS when enabled. Demo data is explicitly marked as demo; external bus/train feeds require an authorized provider endpoint.</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
+let buses=[],routes={},passengerMap=null,adminMap=null,markers={},adminMarkers={},selectedBus=null,gpsTimer=null,passengerMarker=null,nearbyBuses=[];
+const $=id=>document.getElementById(id);
+
+function showPage(id){
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  const page=$(id); if(!page) return;
+  page.classList.add('active');
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  const btn=$('nav'+id.charAt(0).toUpperCase()+id.slice(1)); if(btn) btn.classList.add('active');
+  setTimeout(()=>{try{if(passengerMap)passengerMap.invalidateSize();if(adminMap)adminMap.invalidateSize();}catch(e){}},100);
+}
+
+function bindNavigation(){
+  $('navPassenger').onclick=()=>showPage('passenger');
+  $('navDriver').onclick=()=>showPage('driver');
+  $('navAdmin').onclick=()=>{showPage('admin');loadStats();};
+  $('driverBus').onchange=renderDriver;
+}
+
+function badge(s){let c=s==='On Time'?'green':s==='Delayed'?'red':s==='Offline'?'red':'gray';return `<span class="badge ${c}">${s}</span>`}
+function crowd(c){let x=c==='Low'?'green':c==='Medium'?'yellow':'red';return `<span class="badge ${x}">${c}</span>`}
+
+async function init(){
+  bindNavigation();
+  try{
+    const rr=await fetch('/api/routes');
+    if(!rr.ok) throw new Error('Could not load routes');
+    routes=await rr.json();
+    const bb=await fetch('/api/buses');
+    if(!bb.ok) throw new Error('Could not load buses');
+    buses=(await bb.json()).buses||[];
+    populateControls();
+    initMaps();
+    renderAll();
+    connectWS();
+    loadIntegrations();
+  }catch(e){
+    console.error('CityRide initialization error:',e);
+    $('routeSelect').innerHTML='<option value="">Server connection failed</option>';
+    $('busList').innerHTML='<p class="small">Could not load CityRide data. Make sure the FastAPI server is running, then refresh.</p>';
+    $('gpsStatus').textContent='Server data unavailable';
+  }
+}
+
+function populateControls(){
+  $('routeSelect').innerHTML='<option value="">Select a route…</option>';
+  $('driverRoute').innerHTML='';
+  $('driverBus').innerHTML='';
+  Object.entries(routes).forEach(([id,r])=>{
+    $('routeSelect').innerHTML+=`<option value="${id}">${id} — ${r.name}</option>`;
+    $('driverRoute').innerHTML+=`<option value="${id}">${id} — ${r.name}</option>`;
+  });
+  const ids=Object.keys(routes); if(ids.length) $('routeSelect').value=ids[0];
+  buses.forEach(b=>$('driverBus').innerHTML+=`<option value="${b.bus_id}">${b.bus_id}</option>`);
+  if(buses.length) $('driverBus').value=buses[0].bus_id;
+}
+
+function initMaps(){
+  if(!window.L){$('passLoc').textContent='Map library unavailable; navigation and GPS still work.';return;}
+  try{
+    passengerMap=L.map('map').setView([30.73,76.77],12);
+    adminMap=L.map('adminMap').setView([30.73,76.77],12);
+    const tile='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    L.tileLayer(tile,{attribution:'© OpenStreetMap contributors'}).addTo(passengerMap);
+    L.tileLayer(tile,{attribution:'© OpenStreetMap contributors'}).addTo(adminMap);
+  }catch(e){console.error('Map initialization failed:',e);passengerMap=null;adminMap=null;}
+}
+
+function renderMaps(){
+  if(!window.L||!passengerMap||!adminMap)return;
+  buses.forEach(b=>{
+    const p=`<b>${b.bus_id}</b><br>${b.route_id} — ${b.route_name}<br>Next: ${b.next_stop}<br>ETA: ${b.eta} min<br>${badge(b.status)}<br>Crowd: ${crowd(b.crowd_label)}<br>Source: ${b.source}`;
+    if(!markers[b.bus_id])markers[b.bus_id]=L.marker([b.lat,b.lng]).addTo(passengerMap);
+    markers[b.bus_id].setLatLng([b.lat,b.lng]).bindPopup(p);
+    if(!adminMarkers[b.bus_id])adminMarkers[b.bus_id]=L.marker([b.lat,b.lng]).addTo(adminMap);
+    adminMarkers[b.bus_id].setLatLng([b.lat,b.lng]).bindPopup(p);
+  });
+}
+
+function renderPassenger(){
+  const route=$('routeSelect').value,list=$('busList');list.innerHTML='';
+  if(!route){list.innerHTML='<p class="small">Select a route to see buses.</p>';}
+  else{
+    const filtered=buses.filter(b=>b.route_id===route);
+    filtered.forEach(b=>list.innerHTML+=`<div class="bus" onclick="selectBus('${b.bus_id}')"><b>🚌 ${b.bus_id}</b> ${badge(b.status)} ${crowd(b.crowd_label)}<br><small>Next: ${b.next_stop} • ETA: <b>${b.eta} min</b></small></div>`);
+    if(!filtered.length)list.innerHTML='<p class="small">No buses on this route.</p>';
+  }
+  const nl=$('nearbyList');
+  nl.innerHTML=nearbyBuses.length?'<b>Nearby buses</b>'+nearbyBuses.map(b=>`<div class="bus" onclick="selectBus('${b.bus_id}')"><b>🚌 ${b.bus_id}</b> — ${b.distance_km} km away<br><small>${b.route_id} • ${b.next_stop} • ETA ${b.eta} min</small></div>`).join(''):'';
+}
+
+function selectBus(id){
+  selectedBus=buses.find(b=>b.bus_id===id);if(!selectedBus)return;
+  $('nextStop').innerHTML=`<b>${selectedBus.bus_id}</b><br>Next stop: ${selectedBus.next_stop}<br>ETA: <b>${selectedBus.eta} minutes</b><br>Status: ${badge(selectedBus.status)}<br>Crowd: ${crowd(selectedBus.crowd_label)}<br><span class="small">Source: ${selectedBus.source} • Updated: ${selectedBus.updated||'—'}</span>`;
+  if(markers[id])markers[id].openPopup();
+}
+
+function renderAdmin(){
+  $('fleetTable').innerHTML=buses.map(b=>`<tr><td><b>${b.bus_id}</b></td><td>${b.route_id}</td><td>${badge(b.status)}</td><td>${b.source}</td></tr>`).join('');
+  $('mTotal').textContent=buses.length;
+  $('mActive').textContent=buses.filter(b=>b.active).length;
+  $('mDelayed').textContent=buses.filter(b=>b.status==='Delayed').length;
+  $('mOffline').textContent=buses.filter(b=>b.status==='Offline').length;
+}
+
+function renderDriver(){
+  const el=$('driverBus');if(!el)return;const b=buses.find(x=>x.bus_id===el.value);if(!b)return;
+  $('driverBusLabel').textContent=b.bus_id;$('driverSpeed').textContent=Math.round(b.speed);
+  $('driverInfo').innerHTML=`Route: <b>${b.route_id}</b><br>Status: ${badge(b.status)}<br>Next: ${b.next_stop}<br>Source: ${b.source}`;
+}
+function renderAll(){renderPassenger();renderMaps();renderAdmin();renderDriver();}
+
+function connectWS(){
+  try{
+    const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+    ws.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.type==='fleet_update'){buses=d.buses||[];renderAll();}}catch(err){console.error(err)}};
+    ws.onclose=()=>setTimeout(connectWS,2000);
+    ws.onerror=()=>ws.close();
+  }catch(e){console.error('WebSocket error:',e)}
+}
+
+async function loadIntegrations(){
+  try{const r=await fetch('/api/integrations');const info=await r.json();$('integrationInfo').textContent=`Phone GPS ✓ • WebSocket ✓ • Passenger location ✓ • GTFS-RT: ${info.gtfs_realtime.configured?'YES':'NO'} • Train API: ${info.train_status.configured?'YES':'NO'}`;}catch(e){$('integrationInfo').textContent='Integration status unavailable';}
+}
+async function loadStats(){try{const r=await fetch('/api/stats');const s=await r.json();$('mTotal').textContent=s.total;$('mActive').textContent=s.active;$('mDelayed').textContent=s.delayed;$('mOffline').textContent=s.offline;}catch(e){}}
+async function post(url,data){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json();}
+async function startTrip(){try{await post('/api/trip/start',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='Trip started — now start live phone GPS.';}catch(e){$('gpsStatus').textContent='Trip error: '+e.message;}}
+async function endTrip(){try{if(gpsTimer){clearInterval(gpsTimer);gpsTimer=null;}await post('/api/trip/end',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='GPS: trip ended';}catch(e){$('gpsStatus').textContent='Trip error: '+e.message;}}
+async function startDemo(){try{await post('/api/demo/start',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='GPS: demo simulation active';}catch(e){$('gpsStatus').textContent='Demo error: '+e.message;}}
+
+function usePhoneGPS(){
+  const bus_id=$('driverBus').value,route_id=$('driverRoute').value;
+  if(!navigator.geolocation){$('gpsStatus').textContent='GPS is not supported by this browser.';return;}
+  if(!window.isSecureContext&&!['localhost','127.0.0.1'].includes(location.hostname)){$('gpsStatus').textContent='Phone GPS requires HTTPS on a deployed site.';return;}
+  if(gpsTimer)clearInterval(gpsTimer);
+  const send=()=>navigator.geolocation.getCurrentPosition(async pos=>{
+    try{const speed=(pos.coords.speed||0)*3.6;await post('/api/gps',{bus_id,route_id,lat:pos.coords.latitude,lng:pos.coords.longitude,speed,crowd:40});$('gpsStatus').textContent=`GPS: LIVE • ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`;}catch(e){$('gpsStatus').textContent='GPS upload error: '+e.message;}
+  },err=>$('gpsStatus').textContent='GPS error: '+({1:'Permission denied. Allow location for this site.',2:'Location unavailable. Turn on Location Services.',3:'Location request timed out.'}[err.code]||err.message),{enableHighAccuracy:true,maximumAge:2000,timeout:10000});
+  send();gpsTimer=setInterval(send,5000);
+}
+
+async function locatePassenger(){
+  const box=$('passLoc');
+  if(!window.isSecureContext&&!['localhost','127.0.0.1'].includes(location.hostname)){box.textContent='Location unavailable: open CityRide using HTTPS (or localhost).';return;}
+  if(!navigator.geolocation){box.textContent='Location unavailable: this browser does not support location.';return;}
+  box.textContent='Requesting your location…';
+  try{if(navigator.permissions?.query){const p=await navigator.permissions.query({name:'geolocation'});if(p.state==='denied'){box.textContent='Location permission is blocked. Chrome → site settings → Location → Allow, then reload.';return;}}}catch(e){}
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const lat=pos.coords.latitude,lng=pos.coords.longitude;
+    box.textContent=`Location shared: ${lat.toFixed(5)}, ${lng.toFixed(5)} (accuracy ±${Math.round(pos.coords.accuracy||0)} m)`;
+    if(passengerMap){if(passengerMarker)passengerMap.removeLayer(passengerMarker);passengerMarker=L.marker([lat,lng]).addTo(passengerMap).bindPopup('You are here').openPopup();passengerMap.setView([lat,lng],14);}
+    try{const r=await fetch(`/api/nearby?lat=${lat}&lng=${lng}&radius_km=10`);const data=await r.json();nearbyBuses=data.buses||[];renderPassenger();if(!nearbyBuses.length)$('nearbyList').innerHTML='<div class="notice">No CityRide buses are within 10 km of your current location.</div>';}catch(e){box.textContent+=' • Nearby bus search failed.';}
+  },err=>{box.textContent='Location error: '+({1:'Permission denied. Allow Location for this site.',2:'Device could not determine your location. Turn on Windows Location Services.',3:'Location request timed out. Try again.'}[err.code]||err.message);},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+}
+
+window.addEventListener('DOMContentLoaded',init);
+</script></body></html>
