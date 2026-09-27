@@ -14,7 +14,7 @@ BASE = Path(__file__).parent
 DB = BASE / "cityride.db"
 STALE_SECONDS = int(os.getenv("STALE_SECONDS", "20"))
 
-app = FastAPI(title="CityRide SIH25013 V4", version="4.3")
+app = FastAPI(title="CityRide SIH25013 V4", version="4.4")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
 # Demo city data. Replace/extend with official GTFS/GTFS-Realtime data in deployment.
@@ -37,7 +37,7 @@ ROUTES = {
 BUSES = {
     "PB10-1001": {"route_id":"R12","lat":30.70465,"lng":76.71787,"speed":32,"active":False,"crowd":32,"status":"Waiting","updated":None,"source":"demo","demo_index":0},
     "PB10-1002": {"route_id":"R18","lat":30.70465,"lng":76.71787,"speed":28,"active":False,"crowd":54,"status":"Waiting","updated":None,"source":"demo","demo_index":0},
-    "PB10-1003": {"route_id":"R12","lat":30.71960,"lng":76.83750,"speed":24,"active":False,"crowd":71,"status":"Waiting","updated":None,"source":"demo","demo_index":3},
+    "PB10-1003": {"route_id":"R12","lat":30.71960,"lng":76.83750,"speed":24,"active":True,"crowd":71,"status":"On Time","updated":None,"source":"demo","demo_index":3},
 }
 
 class GPSUpdate(BaseModel):
@@ -92,18 +92,32 @@ def is_stale(b):
     t=parse_dt(b.get("updated")); return bool(t and (datetime.now(timezone.utc)-t).total_seconds()>STALE_SECONDS)
 
 def public_state():
+    """Return only buses that currently have a valid live/demo position.
+
+    A bus that has merely had its trip started but has not sent GPS is NOT
+    published to passengers. Phone-GPS buses are removed once their last GPS
+    update becomes stale.
+    """
     result=[]
     with lock:
         for bid,b in BUSES.items():
-            # Only publish buses that are currently active AND have a fresh
-            # location update. This prevents old/demo Punjab coordinates from
-            # appearing after a trip is stopped or the phone GPS is paused.
-            stale=is_stale(b)
-            if not b.get("active") or stale:
+            source=b.get("source","demo")
+            # A trip start alone must not create a visible bus.
+            if not b.get("active") or source not in ("phone-gps", "demo"):
+                continue
+            # A live phone bus disappears after the stale timeout.
+            if source == "phone-gps" and is_stale(b):
                 continue
             route=ROUTES[b["route_id"]]; ns=nearest_stop(b,route)
-            result.append({"bus_id":bid,"route_id":b["route_id"],"route_name":route["name"],"lat":b["lat"],"lng":b["lng"],"speed":round(b["speed"],1),"active":True,"stale":False,"crowd":b["crowd"],"crowd_label":crowd_label(b["crowd"]),"status":b["status"],"next_stop":ns["name"],"eta":calculate_eta_minutes(b,ns),"updated":b["updated"],"source":b.get("source","demo")})
+            stale=is_stale(b)
+            status="Offline" if stale and b["active"] else b["status"]
+            result.append({"bus_id":bid,"route_id":b["route_id"],"route_name":route["name"],"lat":b["lat"],"lng":b["lng"],"speed":round(b["speed"],1),"active":True,"stale":stale,"crowd":b["crowd"],"crowd_label":crowd_label(b["crowd"]),"status":status,"next_stop":ns["name"],"eta":calculate_eta_minutes(b,ns),"updated":b["updated"],"source":source})
     return result
+
+def driver_buses_state():
+    """Return the configured bus IDs for the driver selector, regardless of activity."""
+    with lock:
+        return [{"bus_id":bid,"route_id":b["route_id"]} for bid,b in BUSES.items()]
 
 db().close()
 
@@ -111,6 +125,8 @@ db().close()
 async def home(): return FileResponse(BASE/"static"/"index.html")
 @app.get("/api/routes")
 async def routes(): return ROUTES
+@app.get("/api/driver-buses")
+async def driver_buses(): return {"buses":driver_buses_state()}
 @app.get("/api/buses")
 async def buses(): return {"buses":public_state(),"server_time":now()}
 @app.get("/api/nearby")
@@ -127,16 +143,14 @@ async def start_trip(action:TripAction):
     if action.bus_id not in BUSES or action.route_id not in ROUTES: raise HTTPException(404,"Unknown bus or route")
     with lock:
         b=BUSES[action.bus_id]
-        # Do not publish the bus yet. It becomes visible only after the phone
-        # sends its first real GPS coordinate.
-        b.update(route_id=action.route_id,active=False,status="Waiting",updated=None,source="phone_pending")
+        b.update(route_id=action.route_id,active=True,status="Waiting for GPS",updated=now(),source="phone_pending")
     conn=db(); conn.execute("INSERT INTO trips(bus_id,route_id,started_at,status) VALUES(?,?,?,?)",(action.bus_id,action.route_id,now(),"active")); conn.commit(); conn.close()
     await hub.broadcast({"type":"fleet_update","buses":public_state()}); return {"ok":True,"message":"Trip started"}
 
 @app.post("/api/trip/end")
 async def end_trip(action:TripAction):
     if action.bus_id not in BUSES: raise HTTPException(404,"Unknown bus")
-    with lock: BUSES[action.bus_id].update(active=False,status="Waiting",updated=None,source="demo")
+    with lock: BUSES[action.bus_id].update(active=False,status="Waiting",updated=now(),source="phone_pending")
     conn=db(); conn.execute("UPDATE trips SET ended_at=?,status='completed' WHERE bus_id=? AND ended_at IS NULL",(now(),action.bus_id)); conn.commit(); conn.close()
     await hub.broadcast({"type":"fleet_update","buses":public_state()}); return {"ok":True,"message":"Trip ended"}
 
@@ -182,7 +196,14 @@ def move_demo_bus():
 async def simulator():
     while True:
         await asyncio.sleep(2)
-        with lock: move_demo_bus()
+        with lock:
+            move_demo_bus()
+            # If a phone stops sending GPS, remove that bus from the public fleet.
+            for b in BUSES.values():
+                if b.get("source") == "phone-gps" and b.get("active") and is_stale(b):
+                    b["active"] = False
+                    b["status"] = "Waiting"
+                    b["source"] = "phone_pending"
         await hub.broadcast({"type":"fleet_update","buses":public_state()})
 
 @app.on_event("startup")
