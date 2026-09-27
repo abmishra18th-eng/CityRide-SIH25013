@@ -8,7 +8,7 @@
 <section id="admin" class="page"><div class="hero"><h1>Authority Control Center</h1><p>Monitor live fleet, delayed buses, offline trackers and data source.</p></div><div class="grid"><div class="card"><div class="label">Total buses</div><div class="metric" id="mTotal">0</div></div><div class="card"><div class="label">Active</div><div class="metric" id="mActive">0</div></div><div class="card"><div class="label">Delayed</div><div class="metric" id="mDelayed">0</div></div><div class="card"><div class="label">Offline</div><div class="metric" id="mOffline">0</div></div></div><div class="two" style="margin-top:15px"><div class="card"><div id="adminMap"></div></div><div class="card"><h2>Fleet</h2><table class="table"><thead><tr><th>Bus</th><th>Route</th><th>Status</th><th>Source</th></tr></thead><tbody id="fleetTable"></tbody></table><div class="notice" id="integrationInfo">Checking integrations…</div></div></div></section>
 </main><footer>V4 uses real phone GPS when enabled. Demo data is explicitly marked as demo; external bus/train feeds require an authorized provider endpoint.</footer>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
-let buses=[],routes={},passengerMap=null,adminMap=null,markers={},adminMarkers={},selectedBus=null,gpsTimer=null,passengerMarker=null,nearbyBuses=[];
+let buses=[],driverBuses=[],routes={},passengerMap=null,adminMap=null,markers={},adminMarkers={},selectedBus=null,gpsTimer=null,passengerMarker=null,nearbyBuses=[];
 const $=id=>document.getElementById(id);
 
 function showPage(id){
@@ -39,6 +39,9 @@ async function init(){
     const bb=await fetch('/api/buses');
     if(!bb.ok) throw new Error('Could not load buses');
     buses=(await bb.json()).buses||[];
+    const db=await fetch('/api/driver-buses');
+    if(!db.ok) throw new Error('Could not load driver buses');
+    driverBuses=(await db.json()).buses||[];
     populateControls();
     initMaps();
     renderAll();
@@ -61,15 +64,16 @@ function populateControls(){
     $('driverRoute').innerHTML+=`<option value="${id}">${id} — ${r.name}</option>`;
   });
   const ids=Object.keys(routes); if(ids.length) $('routeSelect').value=ids[0];
-  buses.forEach(b=>$('driverBus').innerHTML+=`<option value="${b.bus_id}">${b.bus_id}</option>`);
-  if(buses.length) $('driverBus').value=buses[0].bus_id;
+  driverBuses.forEach(b=>$('driverBus').innerHTML+=`<option value="${b.bus_id}">${b.bus_id}</option>`);
+  if(driverBuses.length) $('driverBus').value=driverBuses[0].bus_id;
+  else $('driverBus').innerHTML='<option value="">No buses configured</option>';
 }
 
 function initMaps(){
   if(!window.L){$('passLoc').textContent='Map library unavailable; navigation and GPS still work.';return;}
   try{
-    passengerMap=L.map('map').setView([30.73,76.77],12);
-    adminMap=L.map('adminMap').setView([30.73,76.77],12);
+    passengerMap=L.map('map').setView([20.5937,78.9629],5);
+    adminMap=L.map('adminMap').setView([20.5937,78.9629],5);
     const tile='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
     L.tileLayer(tile,{attribution:'© OpenStreetMap contributors'}).addTo(passengerMap);
     L.tileLayer(tile,{attribution:'© OpenStreetMap contributors'}).addTo(adminMap);
@@ -78,16 +82,9 @@ function initMaps(){
 
 function renderMaps(){
   if(!window.L||!passengerMap||!adminMap)return;
-  const visible=new Set(buses.map(b=>b.bus_id));
-
-  // Remove markers for buses that are no longer active / have stale GPS.
-  Object.keys(markers).forEach(id=>{
-    if(!visible.has(id)){passengerMap.removeLayer(markers[id]);delete markers[id];}
-  });
-  Object.keys(adminMarkers).forEach(id=>{
-    if(!visible.has(id)){adminMap.removeLayer(adminMarkers[id]);delete adminMarkers[id];}
-  });
-
+  const liveIds=new Set(buses.map(b=>b.bus_id));
+  Object.keys(markers).forEach(id=>{if(!liveIds.has(id)){passengerMap.removeLayer(markers[id]);delete markers[id];}});
+  Object.keys(adminMarkers).forEach(id=>{if(!liveIds.has(id)){adminMap.removeLayer(adminMarkers[id]);delete adminMarkers[id];}});
   buses.forEach(b=>{
     const p=`<b>${b.bus_id}</b><br>${b.route_id} — ${b.route_name}<br>Next: ${b.next_stop}<br>ETA: ${b.eta} min<br>${badge(b.status)}<br>Crowd: ${crowd(b.crowd_label)}<br>Source: ${b.source}`;
     if(!markers[b.bus_id])markers[b.bus_id]=L.marker([b.lat,b.lng]).addTo(passengerMap);
@@ -95,15 +92,19 @@ function renderMaps(){
     if(!adminMarkers[b.bus_id])adminMarkers[b.bus_id]=L.marker([b.lat,b.lng]).addTo(adminMap);
     adminMarkers[b.bus_id].setLatLng([b.lat,b.lng]).bindPopup(p);
   });
+  if(!buses.length){
+    // No active buses: return the maps to a neutral India view.
+    passengerMap.setView([20.5937,78.9629],5);
+    adminMap.setView([20.5937,78.9629],5);
+  }
 }
-
 function renderPassenger(){
   const route=$('routeSelect').value,list=$('busList');list.innerHTML='';
   if(!route){list.innerHTML='<p class="small">Select a route to see buses.</p>';}
   else{
     const filtered=buses.filter(b=>b.route_id===route);
     filtered.forEach(b=>list.innerHTML+=`<div class="bus" onclick="selectBus('${b.bus_id}')"><b>🚌 ${b.bus_id}</b> ${badge(b.status)} ${crowd(b.crowd_label)}<br><small>Next: ${b.next_stop} • ETA: <b>${b.eta} min</b></small></div>`);
-    if(!filtered.length)list.innerHTML='<p class="small">🚌 No buses available right now.</p>';
+    if(!filtered.length)list.innerHTML='<div class="notice">No buses available on this route.</div>';
   }
   const nl=$('nearbyList');
   nl.innerHTML=nearbyBuses.length?'<b>Nearby buses</b>'+nearbyBuses.map(b=>`<div class="bus" onclick="selectBus('${b.bus_id}')"><b>🚌 ${b.bus_id}</b> — ${b.distance_km} km away<br><small>${b.route_id} • ${b.next_stop} • ETA ${b.eta} min</small></div>`).join(''):'';
@@ -124,9 +125,19 @@ function renderAdmin(){
 }
 
 function renderDriver(){
-  const el=$('driverBus');if(!el)return;const b=buses.find(x=>x.bus_id===el.value);if(!b)return;
-  $('driverBusLabel').textContent=b.bus_id;$('driverSpeed').textContent=Math.round(b.speed);
-  $('driverInfo').innerHTML=`Route: <b>${b.route_id}</b><br>Status: ${badge(b.status)}<br>Next: ${b.next_stop}<br>Source: ${b.source}`;
+  const el=$('driverBus');if(!el)return;
+  const id=el.value;
+  const b=buses.find(x=>x.bus_id===id);
+  const configured=driverBuses.find(x=>x.bus_id===id);
+  if(b){
+    $('driverBusLabel').textContent=b.bus_id;$('driverSpeed').textContent=Math.round(b.speed);
+    $('driverInfo').innerHTML=`Route: <b>${b.route_id}</b><br>Status: ${badge(b.status)}<br>Next: ${b.next_stop}<br>Source: ${b.source}`;
+  }else if(configured){
+    $('driverBusLabel').textContent=configured.bus_id;$('driverSpeed').textContent='0';
+    $('driverInfo').innerHTML=`Route: <b>${$('driverRoute').value}</b><br>Status: <span class="badge gray">Not active</span><br>No live GPS position yet.`;
+  }else{
+    $('driverBusLabel').textContent='—';$('driverSpeed').textContent='0';$('driverInfo').textContent='No buses configured.';
+  }
 }
 function renderAll(){renderPassenger();renderMaps();renderAdmin();renderDriver();}
 
@@ -144,8 +155,8 @@ async function loadIntegrations(){
 }
 async function loadStats(){try{const r=await fetch('/api/stats');const s=await r.json();$('mTotal').textContent=s.total;$('mActive').textContent=s.active;$('mDelayed').textContent=s.delayed;$('mOffline').textContent=s.offline;}catch(e){}}
 async function post(url,data){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json();}
-async function startTrip(){try{await post('/api/trip/start',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='Trip started — now start live phone GPS.';}catch(e){$('gpsStatus').textContent='Trip error: '+e.message;}}
-async function endTrip(){try{if(gpsTimer){clearInterval(gpsTimer);gpsTimer=null;}await post('/api/trip/end',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='GPS: trip ended';}catch(e){$('gpsStatus').textContent='Trip error: '+e.message;}}
+async function startTrip(){try{await post('/api/trip/start',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='Trip started — bus will appear only after live GPS is received.';}catch(e){$('gpsStatus').textContent='Trip error: '+e.message;}}
+async function endTrip(){try{if(gpsTimer){clearInterval(gpsTimer);gpsTimer=null;}await post('/api/trip/end',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='GPS stopped — bus is no longer available to passengers.';}catch(e){$('gpsStatus').textContent='Trip error: '+e.message;}}
 async function startDemo(){try{await post('/api/demo/start',{bus_id:$('driverBus').value,route_id:$('driverRoute').value});$('gpsStatus').textContent='GPS: demo simulation active';}catch(e){$('gpsStatus').textContent='Demo error: '+e.message;}}
 
 function usePhoneGPS(){
